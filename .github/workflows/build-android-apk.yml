@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'artifacts/komil/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
       - '.github/workflows/build-android-apk.yml'
   workflow_dispatch:
 
