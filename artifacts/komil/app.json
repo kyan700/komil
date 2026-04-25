@@ -16,7 +16,13 @@
     "ios": {
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.kyan700.komil",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#0A0A0A"
+      }
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -33,6 +39,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fee3251d-588a-4921-84c2-581b3f86a019"
+      }
+    },
+    "owner": "kyan700"
   }
 }
