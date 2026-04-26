@@ -26,7 +26,7 @@ function offsetToIso(offset: "today" | "tomorrow" | "week" | "none"): string | u
 
 export default function TodayScreen() {
   const colors = useColors();
-  const { tasks, subjects, schedule, addTask, completeTask, recordFocusSession, postponeTask, breakdownTask } = useApp();
+  const { tasks, subjects, schedule, addTask, completeTask, recordFocusSession, postponeTask, breakdownTask, userName } = useApp();
   const [addOpen, setAddOpen] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
 
@@ -67,7 +67,7 @@ export default function TodayScreen() {
       >
         <HeroCard
           greeting={greeting}
-          name="معمر"
+          name={userName || "صديقي"}
           criticalCount={criticalCount}
           todayPct={score.pct}
           todayCompleted={score.completed}
