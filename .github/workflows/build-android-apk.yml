@@ -43,6 +43,17 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile=false
 
+      - name: Inject Komil AI key into .env
+        env:
+          KOMIL_AI: ${{ secrets.KOMIL_AI }}
+        run: |
+          if [ -n "$KOMIL_AI" ]; then
+            echo "EXPO_PUBLIC_KOMIL_AI=$KOMIL_AI" > .env
+            echo "::notice::Injected Komil AI key into .env (length: ${#KOMIL_AI})"
+          else
+            echo "::warning::KOMIL_AI secret not set; build will run without baked-in key."
+          fi
+
       - name: Initialize EAS project (first run only)
         run: |
           if ! grep -q "projectId" app.json; then
