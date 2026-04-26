@@ -8,7 +8,7 @@
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "eas-build-pre-install": "cd ../.. && rm -f pnpm-lock.yaml && pnpm install --no-frozen-lockfile --ignore-scripts"
+    "eas-build-pre-install": "cd ../.. && rm -f pnpm-lock.yaml && pnpm install --no-frozen-lockfile --ignore-scripts && (test -e artifacts/komil/node_modules/expo-secure-store || (echo '>>> SECURE-STORE MISSING, force-installing' && cd artifacts/komil && pnpm add --save-dev expo-secure-store@~15.0.7 --ignore-scripts))"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
