@@ -29,6 +29,8 @@ interface AppState {
   inbox: InboxItem[];
   focusSessions: FocusSession[];
   streak: number;
+  userName: string;
+  setUserName: (name: string) => void;
   // Tasks
   addTask: (input: Omit<Task, "id" | "createdAt" | "postponedCount" | "status"> & { status?: Task["status"] }) => Task;
   updateTask: (id: string, patch: Partial<Task>) => void;
@@ -54,139 +56,10 @@ interface AppState {
 
 const AppContext = createContext<AppState | null>(null);
 
-const SUBJECT_SHADES = [
-  "#FAFAFA",
-  "#CFCFCF",
-  "#A0A0A0",
-  "#7D7D7D",
-  "#5C5C5C",
-  "#3D3D3D",
-];
-
-const seedSubjects: Subject[] = [
-  {
-    id: "seed_math",
-    name: "تفاضل وتكامل متقدم",
-    instructor: "د. الراشد",
-    shade: SUBJECT_SHADES[0]!,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "seed_crypto",
-    name: "تشفير ما بعد الكوانتم",
-    instructor: "د. البلوشي",
-    shade: SUBJECT_SHADES[1]!,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "seed_ai",
-    name: "تعلم الآلة",
-    instructor: "د. النعيمي",
-    shade: SUBJECT_SHADES[2]!,
-    createdAt: new Date().toISOString(),
-  },
-];
-
-function todayAt(hour: number, minute = 0): string {
-  const d = new Date();
-  d.setHours(hour, minute, 0, 0);
-  return d.toISOString();
-}
-
-function tomorrowAt(hour: number, minute = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(hour, minute, 0, 0);
-  return d.toISOString();
-}
-
-function inDays(days: number, hour = 9): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  d.setHours(hour, 0, 0, 0);
-  return d.toISOString();
-}
-
-const seedTasks: Task[] = [
-  {
-    id: "seed_t1",
-    title: "تحضير عرض تشفير ما بعد الكوانتم",
-    subjectId: "seed_crypto",
-    dueDate: tomorrowAt(15),
-    estimatedMinutes: 90,
-    priority: "critical",
-    status: "planned",
-    postponedCount: 0,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "seed_t2",
-    title: "حل تمارين الفصل الخامس",
-    subjectId: "seed_math",
-    dueDate: tomorrowAt(20),
-    estimatedMinutes: 60,
-    priority: "high",
-    status: "planned",
-    postponedCount: 0,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "seed_t3",
-    title: "مراجعة محاضرة الشبكات العصبية",
-    subjectId: "seed_ai",
-    dueDate: inDays(3, 18),
-    estimatedMinutes: 45,
-    priority: "normal",
-    status: "inbox",
-    postponedCount: 0,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "seed_t4",
-    title: "كتابة ملخص بحث المراجع",
-    subjectId: "seed_ai",
-    dueDate: inDays(7, 23),
-    estimatedMinutes: 120,
-    priority: "high",
-    status: "planned",
-    postponedCount: 0,
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const seedSchedule: ScheduleEvent[] = [
-  {
-    id: "seed_s1",
-    type: "lecture",
-    title: "محاضرة تفاضل وتكامل",
-    subjectId: "seed_math",
-    startTime: todayAt(10),
-    endTime: todayAt(11, 30),
-    location: "قاعة 204",
-    recurrence: "weekly",
-    weekday: new Date().getDay(),
-  },
-  {
-    id: "seed_s2",
-    type: "lecture",
-    title: "محاضرة تعلم الآلة",
-    subjectId: "seed_ai",
-    startTime: todayAt(14),
-    endTime: todayAt(15, 30),
-    location: "مختبر 3",
-    recurrence: "weekly",
-    weekday: new Date().getDay(),
-  },
-  {
-    id: "seed_s3",
-    type: "exam",
-    title: "امتحان نصفي تفاضل وتكامل",
-    subjectId: "seed_math",
-    startTime: inDays(10, 9),
-    endTime: inDays(10, 11),
-    location: "قاعة الامتحانات",
-  },
-];
+// No seed data — users add their own subjects, tasks, and schedule.
+const seedSubjects: Subject[] = [];
+const seedTasks: Task[] = [];
+const seedSchedule: ScheduleEvent[] = [];
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -196,17 +69,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
   const [streak, setStreak] = useState<number>(0);
+  const [userName, setUserNameState] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [t, sub, sch, inb, foc, str] = await Promise.all([
+      const [t, sub, sch, inb, foc, str, name] = await Promise.all([
         loadJson<Task[]>(STORAGE_KEYS.tasks, seedTasks),
         loadJson<Subject[]>(STORAGE_KEYS.subjects, seedSubjects),
         loadJson<ScheduleEvent[]>(STORAGE_KEYS.schedule, seedSchedule),
         loadJson<InboxItem[]>(STORAGE_KEYS.inbox, []),
         loadJson<FocusSession[]>(STORAGE_KEYS.focusSessions, []),
         loadJson<number>(STORAGE_KEYS.streak, 0),
+        loadJson<string>(STORAGE_KEYS.userName, ""),
       ]);
       if (cancelled) return;
       setTasks(t);
@@ -215,6 +90,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setInbox(inb);
       setFocusSessions(foc);
       setStreak(str);
+      setUserNameState(name);
       setReady(true);
     })();
     return () => {
@@ -240,6 +116,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (ready) saveJson(STORAGE_KEYS.streak, streak);
   }, [streak, ready]);
+  useEffect(() => {
+    if (ready) saveJson(STORAGE_KEYS.userName, userName);
+  }, [userName, ready]);
+
+  const setUserName = useCallback((name: string) => {
+    setUserNameState(name.trim());
+  }, []);
 
   const addTask: AppState["addTask"] = useCallback((input) => {
     const task: Task = {
@@ -362,6 +245,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       inbox,
       focusSessions,
       streak,
+      userName,
+      setUserName,
       addTask,
       updateTask,
       completeTask,
@@ -387,6 +272,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       inbox,
       focusSessions,
       streak,
+      userName,
+      setUserName,
       addTask,
       updateTask,
       completeTask,
