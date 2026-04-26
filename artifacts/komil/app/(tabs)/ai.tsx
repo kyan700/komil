@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,6 +13,7 @@ import {
   View,
 } from "react-native";
 
+import { Logo } from "@/components/Logo";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { useColors } from "@/hooks/useColors";
 import { arabicFont, arabicFontBold, arabicFontHeavy } from "@/constants/typography";
@@ -21,385 +21,393 @@ import {
   AiMessage,
   AiProvider,
   chatCompletion,
-  clearApiKey,
+  detectProviderFromKey,
+  envApiKey,
+  isEnvKey,
   loadApiKey,
   providerInfo,
   saveApiKey,
 } from "@/lib/ai";
 import { generateId, loadJson, saveJson, STORAGE_KEYS } from "@/lib/storage";
+import { useApp } from "@/store/AppContext";
 
-export default function AIScreen() {
+const QUICK_PROMPTS = [
+  "خطّط لي يوم دراسي مكثّف",
+  "لخّص لي الفرق بين الـ Hash Map و الـ Tree Map",
+  "كيف أحضّر للاختبار النهائي خلال 5 أيام؟",
+  "اقترح طريقة لحفظ المصطلحات بسرعة",
+];
+
+export default function AiScreen() {
   const colors = useColors();
-  const scrollRef = useRef<ScrollView>(null);
+  const { userName, university, major } = useApp();
 
-  const [bootLoaded, setBootLoaded] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
+  const baked = isEnvKey();
+  const [apiKey, setApiKeyState] = useState<string | null>(null);
+  const [provider, setProviderState] = useState<AiProvider>("openai");
   const [keyInput, setKeyInput] = useState("");
-  const [provider, setProvider] = useState<AiProvider>("openai");
+  const [showKeyEditor, setShowKeyEditor] = useState(false);
+
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
+  // Load persisted state
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [key, msgs, prov] = await Promise.all([
+      const [k, msgs, prov] = await Promise.all([
         loadApiKey(),
         loadJson<AiMessage[]>(STORAGE_KEYS.aiMessages, []),
         loadJson<AiProvider>(STORAGE_KEYS.aiProvider, "openai"),
       ]);
       if (cancelled) return;
-      setHasKey(!!key);
+      setApiKeyState(k);
       setMessages(msgs);
-      setProvider(prov);
-      setBootLoaded(true);
+      // If env key, prefer auto-detection
+      if (baked && k) {
+        setProviderState(detectProviderFromKey(k));
+      } else {
+        setProviderState(prov);
+      }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [baked]);
 
   useEffect(() => {
-    if (bootLoaded) saveJson(STORAGE_KEYS.aiMessages, messages);
-  }, [messages, bootLoaded]);
-
+    saveJson(STORAGE_KEYS.aiMessages, messages);
+  }, [messages]);
   useEffect(() => {
-    if (bootLoaded) saveJson(STORAGE_KEYS.aiProvider, provider);
-  }, [provider, bootLoaded]);
+    if (!baked) saveJson(STORAGE_KEYS.aiProvider, provider);
+  }, [provider, baked]);
 
-  const onSaveKey = useCallback(async () => {
-    const trimmed = keyInput.trim();
-    if (trimmed.length < 10) {
-      Alert.alert("مفتاح غير صالح", "تأكد من نسخ المفتاح كاملاً.");
+  const handleSaveKey = async () => {
+    const k = keyInput.trim();
+    if (!k) return;
+    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    await saveApiKey(k);
+    setApiKeyState(k);
+    setProviderState(detectProviderFromKey(k));
+    setKeyInput("");
+    setShowKeyEditor(false);
+    setError(null);
+  };
+
+  const send = useCallback(async (text?: string) => {
+    const content = (text ?? input).trim();
+    if (!content || busy) return;
+    if (!apiKey) {
+      setError("لم يُهيَّأ المفتاح بعد. اضغط 'إعدادات الذكاء' لإضافته.");
       return;
     }
-    try {
-      await saveApiKey(trimmed);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setKeyInput("");
-      setHasKey(true);
-    } catch (e: any) {
-      Alert.alert("تعذّر الحفظ", e?.message ?? "حاول مجدداً.");
-    }
-  }, [keyInput]);
-
-  const onClearKey = useCallback(() => {
-    Alert.alert(
-      "حذف المفتاح",
-      "سيُحذف المفتاح من القفل الآمن للجهاز.",
-      [
-        { text: "إلغاء", style: "cancel" },
-        {
-          text: "حذف",
-          style: "destructive",
-          onPress: async () => {
-            await clearApiKey();
-            setHasKey(false);
-          },
-        },
-      ],
-    );
-  }, []);
-
-  const onSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || sending) return;
-    const key = await loadApiKey();
-    if (!key) {
-      setHasKey(false);
-      return;
-    }
+    setError(null);
+    setBusy(true);
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
     const userMsg: AiMessage = {
       id: generateId(),
       role: "user",
-      content: text,
+      content,
       createdAt: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMsg]);
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
     setInput("");
-    setSending(true);
-    Haptics.selectionAsync().catch(() => {});
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
 
     try {
-      const reply = await chatCompletion(provider, key, messages, text);
+      const reply = await chatCompletion(provider, apiKey, messages, content);
       const aiMsg: AiMessage = {
         id: generateId(),
         role: "assistant",
         content: reply,
         createdAt: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, aiMsg]);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+      setMessages([...newHistory, aiMsg]);
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     } catch (e: any) {
-      const errMsg: AiMessage = {
-        id: generateId(),
-        role: "assistant",
-        content: `⚠ ${e?.message ?? "تعذّر الاتصال بالنموذج."}`,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errMsg]);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      setError(e?.message || "حدث خطأ غير متوقّع");
     } finally {
-      setSending(false);
+      setBusy(false);
     }
-  }, [input, sending, provider, messages]);
+  }, [input, busy, apiKey, provider, messages]);
 
-  const onClearChat = useCallback(() => {
-    Alert.alert("مسح المحادثة", "ستُحذف كل الرسائل.", [
-      { text: "إلغاء", style: "cancel" },
-      { text: "مسح", style: "destructive", onPress: () => setMessages([]) },
-    ]);
-  }, []);
+  const clearChat = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setMessages([]);
+    setError(null);
+  };
 
-  if (!bootLoaded) {
-    return (
-      <View style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.foreground} />
-      </View>
-    );
-  }
+  const ready = !!apiKey;
+  const info = providerInfo(provider);
 
-  if (!hasKey) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <ScreenHeader title="مركز الذكاء" subtitle="إعداد المفتاح أوّل مرة" />
-        <ScrollView contentContainerStyle={styles.setupScroll} showsVerticalScrollIndicator={false}>
-          <View style={[styles.setupCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.lockIcon, { borderColor: colors.foreground }]}>
-              <Feather name="lock" size={20} color={colors.foreground} />
-            </View>
-            <Text style={[styles.setupTitle, { color: colors.foreground, fontFamily: arabicFontHeavy }]}>
-              فعّل مساعدك الذكي
-            </Text>
-            <Text style={[styles.setupDesc, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
-              ضع مفتاح الذكاء الاصطناعي. يُخزَّن في القفل الآمن للجهاز باسم{" "}
-              <Text style={{ fontFamily: arabicFontBold, color: colors.foreground }}>komil_ai</Text>{" "}
-              ولا يُرسل لأي جهة سوى المزوّد الذي تختاره.
-            </Text>
+  // Personalised greeting line
+  const personalLine = useMemo(() => {
+    const parts: string[] = [];
+    if (userName) parts.push(userName);
+    if (major) parts.push(`· ${major}`);
+    if (university) parts.push(`· ${university}`);
+    return parts.join(" ");
+  }, [userName, major, university]);
 
-            <View style={styles.providerRow}>
-              {(["openai", "openrouter", "groq"] as AiProvider[]).map((p) => {
-                const active = provider === p;
-                return (
-                  <Pressable
-                    key={p}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      setProvider(p);
-                    }}
-                    style={({ pressed }) => [
-                      styles.providerChip,
-                      {
-                        borderColor: active ? colors.foreground : colors.border,
-                        backgroundColor: active ? colors.foreground : "transparent",
-                        opacity: pressed ? 0.7 : 1,
-                      },
-                    ]}
-                  >
-                    <Text
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <ScreenHeader
+        title="كُميل"
+        subtitle={ready ? `${info.label} · ${info.model}` : "إعداد المساعد"}
+        rightIcon="more-horizontal"
+        onRightPress={() => setShowKeyEditor((v) => !v)}
+      />
+
+      {/* Settings panel (only when needed) */}
+      {(showKeyEditor || !ready) && (
+        <View style={[styles.settingsPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {baked && ready ? (
+            <>
+              <View style={styles.settingsRow}>
+                <Feather name="shield" size={16} color={colors.foreground} />
+                <Text style={[styles.settingsTitle, { color: colors.foreground, fontFamily: arabicFontBold }]}>
+                  المفتاح مدمج في التطبيق
+                </Text>
+              </View>
+              <Text style={[styles.settingsHint, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                لا تحتاج لإدخال أي مفتاح — كُميل جاهز للاستخدام مباشرة.
+              </Text>
+              <View style={styles.settingsBtnRow}>
+                <Pressable
+                  onPress={() => setShowKeyEditor(false)}
+                  style={[styles.settingsBtn, { backgroundColor: colors.foreground }]}
+                >
+                  <Text style={[styles.settingsBtnText, { color: colors.background, fontFamily: arabicFontBold }]}>
+                    حسناً
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={clearChat}
+                  style={[styles.settingsBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+                >
+                  <Text style={[styles.settingsBtnText, { color: colors.foreground, fontFamily: arabicFontBold }]}>
+                    مسح المحادثة
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.settingsTitle, { color: colors.foreground, fontFamily: arabicFontBold }]}>
+                {ready ? "إعدادات المفتاح" : "تهيئة المساعد"}
+              </Text>
+              <Text style={[styles.settingsHint, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                ألصق مفتاح API الخاص بك. يُحفظ بأمان في مخزن الجهاز.
+              </Text>
+
+              <Text style={[styles.label, { color: colors.mutedForeground, fontFamily: arabicFont, marginTop: 10 }]}>
+                المزوّد
+              </Text>
+              <View style={styles.providerRow}>
+                {(["openai", "openrouter", "groq"] as AiProvider[]).map((p) => {
+                  const active = provider === p;
+                  return (
+                    <Pressable
+                      key={p}
+                      onPress={() => setProviderState(p)}
                       style={[
-                        styles.providerChipText,
+                        styles.providerChip,
                         {
-                          color: active ? colors.background : colors.foreground,
-                          fontFamily: arabicFontBold,
+                          backgroundColor: active ? colors.foreground : "transparent",
+                          borderColor: active ? colors.foreground : colors.border,
                         },
                       ]}
                     >
-                      {providerInfo(p).label}
+                      <Text style={[
+                        styles.providerChipText,
+                        {
+                          color: active ? colors.background : colors.foreground,
+                          fontFamily: active ? arabicFontBold : arabicFont,
+                        },
+                      ]}>
+                        {providerInfo(p).label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <TextInput
+                value={keyInput}
+                onChangeText={setKeyInput}
+                placeholder="sk-..."
+                placeholderTextColor={colors.mutedForeground}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[
+                  styles.keyInput,
+                  {
+                    color: colors.foreground,
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+
+              <View style={styles.settingsBtnRow}>
+                <Pressable
+                  onPress={handleSaveKey}
+                  disabled={!keyInput.trim()}
+                  style={[
+                    styles.settingsBtn,
+                    {
+                      backgroundColor: keyInput.trim() ? colors.foreground : colors.border,
+                      opacity: keyInput.trim() ? 1 : 0.5,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.settingsBtnText, { color: colors.background, fontFamily: arabicFontBold }]}>
+                    حفظ المفتاح
+                  </Text>
+                </Pressable>
+                {ready && (
+                  <Pressable
+                    onPress={() => setShowKeyEditor(false)}
+                    style={[styles.settingsBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+                  >
+                    <Text style={[styles.settingsBtnText, { color: colors.foreground, fontFamily: arabicFontBold }]}>
+                      إلغاء
                     </Text>
                   </Pressable>
-                );
-              })}
-            </View>
-
-            <TextInput
-              value={keyInput}
-              onChangeText={setKeyInput}
-              placeholder="sk-..."
-              placeholderTextColor={colors.mutedForeground}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[
-                styles.keyInput,
-                {
-                  borderColor: colors.border,
-                  color: colors.foreground,
-                  fontFamily: arabicFont,
-                  backgroundColor: colors.background,
-                },
-              ]}
-            />
-
-            <Pressable
-              onPress={onSaveKey}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                { backgroundColor: colors.foreground, opacity: pressed ? 0.8 : 1 },
-              ]}
-            >
-              <Feather name="key" size={14} color={colors.background} />
-              <Text style={[styles.primaryBtnText, { color: colors.background, fontFamily: arabicFontBold }]}>
-                حفظ في القفل الآمن
-              </Text>
-            </Pressable>
-
-            <Text style={[styles.hint, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
-              النموذج الافتراضي: {providerInfo(provider).model}
-            </Text>
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-    >
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <ScreenHeader
-          title="مركز الذكاء"
-          subtitle={`${providerInfo(provider).label} · ${providerInfo(provider).model}`}
-        />
-
-        <View style={styles.toolbar}>
-          <Pressable
-            onPress={onClearChat}
-            style={({ pressed }) => [styles.toolBtn, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Feather name="trash-2" size={12} color={colors.mutedForeground} />
-            <Text style={[styles.toolBtnText, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
-              مسح المحادثة
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={onClearKey}
-            style={({ pressed }) => [styles.toolBtn, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Feather name="key" size={12} color={colors.mutedForeground} />
-            <Text style={[styles.toolBtnText, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
-              تغيير المفتاح
-            </Text>
-          </Pressable>
+                )}
+              </View>
+            </>
+          )}
         </View>
+      )}
 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      >
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.chatScroll}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          keyboardShouldPersistTaps="handled"
         >
-          {messages.length === 0 ? (
-            <View style={styles.emptyChat}>
-              <View style={[styles.emptyIcon, { borderColor: colors.border }]}>
-                <Feather name="message-circle" size={20} color={colors.foreground} />
-              </View>
-              <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: arabicFontBold }]}>
-                ابدأ المحادثة
+          {messages.length === 0 && ready ? (
+            <View style={styles.welcomeBox}>
+              <Logo size={42} />
+              <Text style={[styles.welcomeTitle, { color: colors.foreground, fontFamily: arabicFontHeavy }]}>
+                مرحباً {userName || "صديقي"}
               </Text>
-              <Text style={[styles.emptyDesc, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
-                اسأل عن خطة مذاكرة، تفكيك مهمة، شرح مفهوم، أو خطة امتحان.
+              {personalLine && personalLine !== userName && (
+                <Text style={[styles.welcomeSub, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                  {personalLine}
+                </Text>
+              )}
+              <Text style={[styles.welcomeHint, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                اسألني عن دراستك، أو اطلب خطة، أو شرحاً لمفهوم
               </Text>
-              <View style={styles.suggestList}>
-                {[
-                  "اشرح لي ما هو التكامل بطريقة بسيطة",
-                  "ضع لي خطة مذاكرة لامتحان بعد ٧ أيام",
-                  "كيف أنظّم وقتي بين ٣ مواد ثقيلة؟",
-                ].map((s) => (
+
+              <View style={styles.promptsWrap}>
+                {QUICK_PROMPTS.map((p) => (
                   <Pressable
-                    key={s}
-                    onPress={() => setInput(s)}
-                    style={({ pressed }) => [
-                      styles.suggestChip,
-                      { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
-                    ]}
+                    key={p}
+                    onPress={() => send(p)}
+                    style={[styles.promptCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                   >
-                    <Text style={[styles.suggestText, { color: colors.foreground, fontFamily: arabicFont }]}>
-                      {s}
+                    <Text style={[styles.promptText, { color: colors.foreground, fontFamily: arabicFont }]}>
+                      {p}
                     </Text>
+                    <Feather name="arrow-left" size={14} color={colors.mutedForeground} />
                   </Pressable>
                 ))}
               </View>
             </View>
-          ) : (
-            messages.map((m) => <Bubble key={m.id} message={m} />)
-          )}
-          {sending ? (
-            <View style={[styles.bubble, styles.assistantBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <ActivityIndicator color={colors.foreground} size="small" />
-            </View>
           ) : null}
-          <View style={{ height: 12 }} />
+
+          {messages.map((m) => (
+            <Bubble key={m.id} message={m} colors={colors} />
+          ))}
+
+          {busy && (
+            <View style={[styles.bubble, styles.aiBubble, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <ActivityIndicator size="small" color={colors.foreground} />
+              <Text style={[styles.thinkingText, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                يفكر...
+              </Text>
+            </View>
+          )}
+
+          {error && (
+            <View style={[styles.errorBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Feather name="alert-circle" size={14} color={colors.foreground} />
+              <Text style={[styles.errorText, { color: colors.foreground, fontFamily: arabicFont }]}>
+                {error}
+              </Text>
+            </View>
+          )}
+          <View style={{ height: 14 }} />
         </ScrollView>
 
-        <View style={[styles.inputBar, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
+        {/* Input bar */}
+        <View style={[styles.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+          {messages.length > 0 && (
+            <Pressable
+              onPress={clearChat}
+              hitSlop={10}
+              style={[styles.iconBtn, { borderColor: colors.border }]}
+            >
+              <Feather name="trash-2" size={16} color={colors.mutedForeground} />
+            </Pressable>
+          )}
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="اكتب سؤالك..."
+            placeholder={ready ? "اكتب رسالتك لكُميل..." : "يلزم تهيئة المفتاح أولاً"}
             placeholderTextColor={colors.mutedForeground}
+            editable={ready && !busy}
             multiline
             style={[
-              styles.chatInput,
-              {
-                color: colors.foreground,
-                fontFamily: arabicFont,
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
+              styles.input,
+              { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border, fontFamily: arabicFont },
             ]}
           />
           <Pressable
-            onPress={onSend}
-            disabled={!input.trim() || sending}
-            style={({ pressed }) => [
+            onPress={() => send()}
+            disabled={!ready || busy || !input.trim()}
+            style={[
               styles.sendBtn,
               {
-                backgroundColor: !input.trim() || sending ? colors.surface3 : colors.foreground,
-                opacity: pressed ? 0.7 : 1,
+                backgroundColor: ready && input.trim() && !busy ? colors.foreground : colors.border,
+                opacity: ready && input.trim() && !busy ? 1 : 0.5,
               },
             ]}
           >
-            {sending ? (
-              <ActivityIndicator size="small" color={colors.background} />
-            ) : (
-              <Feather name="send" size={16} color={!input.trim() ? colors.mutedForeground : colors.background} />
-            )}
+            <Feather name="arrow-up" size={18} color={colors.background} />
           </Pressable>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
-function Bubble({ message }: { message: AiMessage }) {
-  const colors = useColors();
+function Bubble({ message, colors }: { message: AiMessage; colors: any }) {
   const isUser = message.role === "user";
   return (
-    <View
-      style={[
-        styles.bubble,
-        isUser ? styles.userBubble : styles.assistantBubble,
+    <View style={[styles.bubble, isUser ? styles.userBubble : styles.aiBubble, {
+      backgroundColor: isUser ? colors.foreground : colors.surface,
+      borderColor: isUser ? colors.foreground : colors.border,
+    }]}>
+      <Text style={[
+        styles.bubbleText,
         {
-          backgroundColor: isUser ? colors.foreground : colors.card,
-          borderColor: isUser ? colors.foreground : colors.border,
+          color: isUser ? colors.background : colors.foreground,
+          fontFamily: arabicFont,
         },
-      ]}
-    >
-      <Text
-        style={[
-          styles.bubbleText,
-          {
-            color: isUser ? colors.background : colors.foreground,
-            fontFamily: arabicFont,
-          },
-        ]}
-      >
+      ]}>
         {message.content}
       </Text>
     </View>
@@ -408,145 +416,114 @@ function Bubble({ message }: { message: AiMessage }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  center: { alignItems: "center", justifyContent: "center" },
-  setupScroll: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 60,
-  },
-  setupCard: {
-    padding: 22,
-    borderRadius: 22,
-    borderWidth: 1,
-    gap: 14,
-    alignItems: "center",
-  },
-  lockIcon: {
-    width: 52,
-    height: 52,
+  settingsPanel: {
+    marginHorizontal: 16,
+    padding: 16,
     borderRadius: 16,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
+    borderWidth: 1,
+    marginBottom: 8,
   },
-  setupTitle: { fontSize: 20, textAlign: "center" },
-  setupDesc: { fontSize: 13, lineHeight: 22, textAlign: "center" },
-  providerRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 6,
-    flexWrap: "wrap",
-    justifyContent: "center",
-  },
+  settingsRow: { flexDirection: "row-reverse", alignItems: "center", gap: 8, marginBottom: 6 },
+  settingsTitle: { fontSize: 15, textAlign: "right" },
+  settingsHint: { fontSize: 12, textAlign: "right", lineHeight: 18, marginTop: 4 },
+  label: { fontSize: 11, textAlign: "right" },
+  providerRow: { flexDirection: "row-reverse", gap: 8, marginTop: 6 },
   providerChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
     borderWidth: 1,
   },
   providerChipText: { fontSize: 12 },
   keyInput: {
-    width: "100%",
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    textAlign: "left",
-    marginTop: 6,
-  },
-  primaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    borderRadius: 14,
-    marginTop: 4,
-  },
-  primaryBtnText: { fontSize: 14 },
-  hint: { fontSize: 11, marginTop: 4 },
-  toolbar: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    justifyContent: "flex-start",
-  },
-  toolBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  toolBtnText: { fontSize: 11 },
-  chatScroll: {
-    paddingHorizontal: 16,
-    gap: 8,
-    paddingBottom: 8,
-  },
-  emptyChat: {
-    alignItems: "center",
-    paddingVertical: 32,
-    gap: 10,
-  },
-  emptyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
-  },
-  emptyTitle: { fontSize: 16 },
-  emptyDesc: { fontSize: 12, textAlign: "center", lineHeight: 18, paddingHorizontal: 20 },
-  suggestList: { gap: 8, width: "100%", marginTop: 12, paddingHorizontal: 16 },
-  suggestChip: {
-    paddingHorizontal: 14,
+    marginTop: 12,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
+    fontSize: 13,
+    textAlign: "left",
   },
-  suggestText: { fontSize: 12, lineHeight: 18 },
+  settingsBtnRow: { flexDirection: "row-reverse", gap: 8, marginTop: 12 },
+  settingsBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  settingsBtnText: { fontSize: 13 },
+  chatScroll: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12 },
+  welcomeBox: { alignItems: "center", paddingVertical: 12 },
+  welcomeTitle: { fontSize: 22, marginTop: 12 },
+  welcomeSub: { fontSize: 13, marginTop: 2, textAlign: "center" },
+  welcomeHint: { fontSize: 13, marginTop: 8, textAlign: "center" },
+  promptsWrap: { width: "100%", marginTop: 18, gap: 8 },
+  promptCard: {
+    flexDirection: "row-reverse",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderRadius: 14,
+  },
+  promptText: { fontSize: 13, textAlign: "right", flex: 1 },
   bubble: {
     maxWidth: "88%",
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 16,
     borderWidth: 1,
-    marginVertical: 2,
+    marginVertical: 4,
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 6,
   },
-  userBubble: { alignSelf: "flex-end", borderTopRightRadius: 4 },
-  assistantBubble: { alignSelf: "flex-start", borderTopLeftRadius: 4 },
-  bubbleText: { fontSize: 13, lineHeight: 22, textAlign: "right" },
+  userBubble: { alignSelf: "flex-end", borderBottomRightRadius: 4 },
+  aiBubble: { alignSelf: "flex-start", borderBottomLeftRadius: 4 },
+  bubbleText: { fontSize: 14, lineHeight: 22, textAlign: "right" },
+  thinkingText: { fontSize: 12 },
+  errorBox: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginVertical: 6,
+  },
+  errorText: { fontSize: 12, flex: 1, textAlign: "right" },
   inputBar: {
-    flexDirection: "row",
+    flexDirection: "row-reverse",
     alignItems: "flex-end",
     gap: 8,
     paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === "ios" ? 28 : 14,
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === "ios" ? 26 : 14,
     borderTopWidth: 1,
   },
-  chatInput: {
-    flex: 1,
-    minHeight: 42,
-    maxHeight: 140,
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     borderWidth: 1,
-    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  input: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 110,
     paddingHorizontal: 14,
     paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
     fontSize: 14,
     textAlign: "right",
   },
   sendBtn: {
-    width: 42,
-    height: 42,
+    width: 40,
+    height: 40,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
