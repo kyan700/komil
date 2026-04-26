@@ -9,6 +9,9 @@ export const STORAGE_KEYS = {
   onboarded: "komil:onboarded:v1",
   focusSessions: "komil:focusSessions:v1",
   streak: "komil:streak:v1",
+  userName: "komil:userName:v1",
+  aiMessages: "komil:aiMessages:v1",
+  aiProvider: "komil:aiProvider:v1",
 } as const;
 
 export async function loadJson<T>(key: string, fallback: T): Promise<T> {
