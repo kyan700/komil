@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { FAB } from "@/components/FAB";
 import { FocusModal } from "@/components/FocusModal";
@@ -26,9 +27,18 @@ function offsetToIso(offset: "today" | "tomorrow" | "week" | "none"): string | u
 
 export default function TodayScreen() {
   const colors = useColors();
-  const { tasks, subjects, schedule, addTask, completeTask, recordFocusSession, postponeTask, breakdownTask, userName } = useApp();
+  const { tasks, subjects, schedule, addTask, completeTask, recordFocusSession, postponeTask, breakdownTask, userName, lectures, university, major, toggleLectureAttended } = useApp();
+  const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
+
+  const upcomingLectures = useMemo(() => {
+    const now = Date.now();
+    return [...lectures]
+      .filter((l) => !l.attended && new Date(l.date).getTime() >= now - 30 * 60 * 1000)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .slice(0, 3);
+  }, [lectures]);
 
   const greeting = getGreeting();
   const score = useMemo(() => todayScore(tasks), [tasks]);
@@ -120,6 +130,65 @@ export default function TodayScreen() {
           <Timeline schedule={schedule} tasks={tasks} subjects={subjects} />
         </View>
 
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: arabicFontHeavy }]}>
+              المحاضرات القادمة
+            </Text>
+            <Pressable onPress={() => router.push("/lectures")} hitSlop={6}>
+              <Text style={[styles.sectionMeta, { color: colors.foreground, fontFamily: arabicFontBold }]}>
+                عرض الكل
+              </Text>
+            </Pressable>
+          </View>
+          {upcomingLectures.length === 0 ? (
+            <View style={[styles.emptyLectures, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Feather name="book-open" size={18} color={colors.mutedForeground} />
+              <Text style={[styles.emptyLecturesText, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                لا توجد محاضرات قادمة
+              </Text>
+            </View>
+          ) : (
+            upcomingLectures.map((lec) => {
+              const subj = subjects.find((s) => s.id === lec.subjectId);
+              const d = new Date(lec.date);
+              const dateLabel = d.toLocaleDateString("ar-SA", { weekday: "short", day: "numeric", month: "short" });
+              const timeLabel = d.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit", hour12: true });
+              return (
+                <Pressable
+                  key={lec.id}
+                  onPress={() => router.push("/lectures")}
+                  style={[styles.lecMini, { backgroundColor: colors.card, borderColor: colors.border }]}
+                >
+                  <Pressable
+                    onPress={() => toggleLectureAttended(lec.id)}
+                    hitSlop={10}
+                    style={[styles.miniCheck, { borderColor: colors.border }]}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={[styles.lecMiniTitle, { color: colors.foreground, fontFamily: arabicFontHeavy }]}>
+                      {lec.title}{lec.important ? "  ★" : ""}
+                    </Text>
+                    <Text style={[styles.lecMiniMeta, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+                      {dateLabel} · {timeLabel}{subj ? ` · ${subj.name}` : ""}{lec.location ? ` · ${lec.location}` : ""}
+                    </Text>
+                  </View>
+                  <Feather name="chevron-left" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+
+        {(university || major) && (
+          <View style={[styles.contextCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="award" size={14} color={colors.mutedForeground} />
+            <Text style={[styles.contextText, { color: colors.mutedForeground, fontFamily: arabicFont }]}>
+              {[major, university].filter(Boolean).join(" · ")}
+            </Text>
+          </View>
+        )}
+
         <View style={{ height: 120 }} />
       </ScrollView>
 
@@ -202,5 +271,54 @@ const styles = StyleSheet.create({
   stressNote: {
     fontSize: 11,
     flex: 1,
+  },
+  emptyLectures: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  emptyLecturesText: {
+    fontSize: 13,
+  },
+  lecMini: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  miniCheck: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1.5,
+  },
+  lecMiniTitle: {
+    fontSize: 14,
+    textAlign: "right",
+  },
+  lecMiniMeta: {
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: "right",
+  },
+  contextCard: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  contextText: {
+    fontSize: 12,
   },
 });
