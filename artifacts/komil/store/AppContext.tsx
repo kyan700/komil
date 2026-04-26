@@ -16,6 +16,7 @@ import {
 import type {
   FocusSession,
   InboxItem,
+  Lecture,
   ScheduleEvent,
   Subject,
   Task,
@@ -23,14 +24,23 @@ import type {
 
 interface AppState {
   ready: boolean;
+  onboarded: boolean;
+  setOnboarded: (v: boolean) => void;
   tasks: Task[];
   subjects: Subject[];
   schedule: ScheduleEvent[];
   inbox: InboxItem[];
   focusSessions: FocusSession[];
+  lectures: Lecture[];
   streak: number;
   userName: string;
+  university: string;
+  major: string;
+  level: string;
   setUserName: (name: string) => void;
+  setUniversity: (v: string) => void;
+  setMajor: (v: string) => void;
+  setLevel: (v: string) => void;
   // Tasks
   addTask: (input: Omit<Task, "id" | "createdAt" | "postponedCount" | "status"> & { status?: Task["status"] }) => Task;
   updateTask: (id: string, patch: Partial<Task>) => void;
@@ -46,6 +56,11 @@ interface AppState {
   addEvent: (input: Omit<ScheduleEvent, "id">) => ScheduleEvent;
   updateEvent: (id: string, patch: Partial<ScheduleEvent>) => void;
   deleteEvent: (id: string) => void;
+  // Lectures
+  addLecture: (input: Omit<Lecture, "id" | "createdAt" | "attended" | "important"> & { attended?: boolean; important?: boolean }) => Lecture;
+  updateLecture: (id: string, patch: Partial<Lecture>) => void;
+  deleteLecture: (id: string) => void;
+  toggleLectureAttended: (id: string) => void;
   // Inbox
   addInboxItem: (input: Omit<InboxItem, "id" | "createdAt" | "resolved">) => InboxItem;
   resolveInboxItem: (id: string) => void;
@@ -56,32 +71,37 @@ interface AppState {
 
 const AppContext = createContext<AppState | null>(null);
 
-// No seed data — users add their own subjects, tasks, and schedule.
-const seedSubjects: Subject[] = [];
-const seedTasks: Task[] = [];
-const seedSchedule: ScheduleEvent[] = [];
-
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [onboarded, setOnboardedState] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [schedule, setSchedule] = useState<ScheduleEvent[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
+  const [lectures, setLectures] = useState<Lecture[]>([]);
   const [streak, setStreak] = useState<number>(0);
   const [userName, setUserNameState] = useState<string>("");
+  const [university, setUniversityState] = useState<string>("");
+  const [major, setMajorState] = useState<string>("");
+  const [level, setLevelState] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [t, sub, sch, inb, foc, str, name] = await Promise.all([
-        loadJson<Task[]>(STORAGE_KEYS.tasks, seedTasks),
-        loadJson<Subject[]>(STORAGE_KEYS.subjects, seedSubjects),
-        loadJson<ScheduleEvent[]>(STORAGE_KEYS.schedule, seedSchedule),
+      const [t, sub, sch, inb, foc, lec, str, name, uni, maj, lvl, ob] = await Promise.all([
+        loadJson<Task[]>(STORAGE_KEYS.tasks, []),
+        loadJson<Subject[]>(STORAGE_KEYS.subjects, []),
+        loadJson<ScheduleEvent[]>(STORAGE_KEYS.schedule, []),
         loadJson<InboxItem[]>(STORAGE_KEYS.inbox, []),
         loadJson<FocusSession[]>(STORAGE_KEYS.focusSessions, []),
+        loadJson<Lecture[]>(STORAGE_KEYS.lectures, []),
         loadJson<number>(STORAGE_KEYS.streak, 0),
         loadJson<string>(STORAGE_KEYS.userName, ""),
+        loadJson<string>(STORAGE_KEYS.university, ""),
+        loadJson<string>(STORAGE_KEYS.major, ""),
+        loadJson<string>(STORAGE_KEYS.level, ""),
+        loadJson<boolean>(STORAGE_KEYS.onboarded, false),
       ]);
       if (cancelled) return;
       setTasks(t);
@@ -89,8 +109,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setSchedule(sch);
       setInbox(inb);
       setFocusSessions(foc);
+      setLectures(lec);
       setStreak(str);
       setUserNameState(name);
+      setUniversityState(uni);
+      setMajorState(maj);
+      setLevelState(lvl);
+      setOnboardedState(ob);
       setReady(true);
     })();
     return () => {
@@ -98,31 +123,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.tasks, tasks);
-  }, [tasks, ready]);
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.subjects, subjects);
-  }, [subjects, ready]);
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.schedule, schedule);
-  }, [schedule, ready]);
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.inbox, inbox);
-  }, [inbox, ready]);
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.focusSessions, focusSessions);
-  }, [focusSessions, ready]);
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.streak, streak);
-  }, [streak, ready]);
-  useEffect(() => {
-    if (ready) saveJson(STORAGE_KEYS.userName, userName);
-  }, [userName, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.tasks, tasks); }, [tasks, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.subjects, subjects); }, [subjects, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.schedule, schedule); }, [schedule, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.inbox, inbox); }, [inbox, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.focusSessions, focusSessions); }, [focusSessions, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.lectures, lectures); }, [lectures, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.streak, streak); }, [streak, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.userName, userName); }, [userName, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.university, university); }, [university, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.major, major); }, [major, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.level, level); }, [level, ready]);
+  useEffect(() => { if (ready) saveJson(STORAGE_KEYS.onboarded, onboarded); }, [onboarded, ready]);
 
-  const setUserName = useCallback((name: string) => {
-    setUserNameState(name.trim());
-  }, []);
+  const setOnboarded = useCallback((v: boolean) => setOnboardedState(v), []);
+  const setUserName = useCallback((name: string) => setUserNameState(name.trim()), []);
+  const setUniversity = useCallback((v: string) => setUniversityState(v.trim()), []);
+  const setMajor = useCallback((v: string) => setMajorState(v.trim()), []);
+  const setLevel = useCallback((v: string) => setLevelState(v.trim()), []);
 
   const addTask: AppState["addTask"] = useCallback((input) => {
     const task: Task = {
@@ -185,9 +203,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateSubject = useCallback((id: string, patch: Partial<Subject>) => {
-    setSubjects((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
-    );
+    setSubjects((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   }, []);
 
   const deleteSubject = useCallback((id: string) => {
@@ -208,6 +224,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSchedule((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
+  const addLecture: AppState["addLecture"] = useCallback((input) => {
+    const lec: Lecture = {
+      ...input,
+      attended: input.attended ?? false,
+      important: input.important ?? false,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+    };
+    setLectures((prev) => [lec, ...prev]);
+    return lec;
+  }, []);
+
+  const updateLecture = useCallback((id: string, patch: Partial<Lecture>) => {
+    setLectures((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  }, []);
+
+  const deleteLecture = useCallback((id: string) => {
+    setLectures((prev) => prev.filter((l) => l.id !== id));
+  }, []);
+
+  const toggleLectureAttended = useCallback((id: string) => {
+    setLectures((prev) => prev.map((l) => (l.id === id ? { ...l, attended: !l.attended } : l)));
+  }, []);
+
   const addInboxItem: AppState["addInboxItem"] = useCallback((input) => {
     const item: InboxItem = {
       ...input,
@@ -220,9 +260,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resolveInboxItem = useCallback((id: string) => {
-    setInbox((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, resolved: true } : i)),
-    );
+    setInbox((prev) => prev.map((i) => (i.id === id ? { ...i, resolved: true } : i)));
   }, []);
 
   const deleteInboxItem = useCallback((id: string) => {
@@ -239,14 +277,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppState>(
     () => ({
       ready,
+      onboarded,
+      setOnboarded,
       tasks,
       subjects,
       schedule,
       inbox,
       focusSessions,
+      lectures,
       streak,
       userName,
+      university,
+      major,
+      level,
       setUserName,
+      setUniversity,
+      setMajor,
+      setLevel,
       addTask,
       updateTask,
       completeTask,
@@ -259,36 +306,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addEvent,
       updateEvent,
       deleteEvent,
+      addLecture,
+      updateLecture,
+      deleteLecture,
+      toggleLectureAttended,
       addInboxItem,
       resolveInboxItem,
       deleteInboxItem,
       recordFocusSession,
     }),
     [
-      ready,
-      tasks,
-      subjects,
-      schedule,
-      inbox,
-      focusSessions,
-      streak,
-      userName,
-      setUserName,
-      addTask,
-      updateTask,
-      completeTask,
-      postponeTask,
-      deleteTask,
-      breakdownTask,
-      addSubject,
-      updateSubject,
-      deleteSubject,
-      addEvent,
-      updateEvent,
-      deleteEvent,
-      addInboxItem,
-      resolveInboxItem,
-      deleteInboxItem,
+      ready, onboarded, setOnboarded,
+      tasks, subjects, schedule, inbox, focusSessions, lectures, streak,
+      userName, university, major, level,
+      setUserName, setUniversity, setMajor, setLevel,
+      addTask, updateTask, completeTask, postponeTask, deleteTask, breakdownTask,
+      addSubject, updateSubject, deleteSubject,
+      addEvent, updateEvent, deleteEvent,
+      addLecture, updateLecture, deleteLecture, toggleLectureAttended,
+      addInboxItem, resolveInboxItem, deleteInboxItem,
       recordFocusSession,
     ],
   );
