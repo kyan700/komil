@@ -53,6 +53,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="lectures"
+        options={{
+          title: "محاضرات",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="book-open" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="tasks"
         options={{
           title: "المهام",
@@ -62,20 +71,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="voice"
-        options={{
-          title: "المسجل",
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="mic" color={color} focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="ai"
         options={{
-          title: "الذكاء",
+          title: "كُميل",
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="cpu" color={color} focused={focused} />
+            <TabIcon name="message-circle" color={color} focused={focused} />
           ),
         }}
       />
@@ -88,6 +88,7 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen name="voice" options={{ href: null }} />
     </Tabs>
   );
 }
