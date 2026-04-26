@@ -6,7 +6,7 @@ import {
   useFonts,
 } from "@expo-google-fonts/ibm-plex-sans-arabic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
@@ -16,16 +16,31 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { SplashOverlay } from "@/components/SplashOverlay";
-import { AppProvider } from "@/store/AppContext";
+import { AppProvider, useApp } from "@/store/AppContext";
 
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
-function RootLayoutNav() {
+function GateAndStack() {
+  const { ready, onboarded } = useApp();
+  const router = useRouter();
+  const segments = useSegments();
+
+  useEffect(() => {
+    if (!ready) return;
+    const inOnboarding = segments[0] === "onboarding";
+    if (!onboarded && !inOnboarding) {
+      router.replace("/onboarding");
+    } else if (onboarded && inOnboarding) {
+      router.replace("/");
+    }
+  }, [ready, onboarded, segments, router]);
+
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#0A0A0A" } }}>
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="onboarding" options={{ animation: "fade" }} />
     </Stack>
   );
 }
@@ -55,7 +70,7 @@ export default function RootLayout() {
             <KeyboardProvider>
               <AppProvider>
                 <StatusBar style="light" />
-                <RootLayoutNav />
+                <GateAndStack />
                 {!revealDone ? <SplashOverlay onFinish={() => setRevealDone(true)} /> : null}
               </AppProvider>
             </KeyboardProvider>
