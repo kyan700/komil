@@ -10,6 +10,10 @@ export const STORAGE_KEYS = {
   focusSessions: "komil:focusSessions:v1",
   streak: "komil:streak:v1",
   userName: "komil:userName:v1",
+  university: "komil:university:v1",
+  major: "komil:major:v1",
+  level: "komil:level:v1",
+  lectures: "komil:lectures:v1",
   aiMessages: "komil:aiMessages:v1",
   aiProvider: "komil:aiProvider:v1",
 } as const;
