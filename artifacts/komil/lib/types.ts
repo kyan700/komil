@@ -55,3 +55,23 @@ export interface FocusSession {
   startedAt: string;
   endedAt?: string;
 }
+
+export interface Lecture {
+  id: string;
+  subjectId?: string;
+  title: string;
+  date: string; // ISO date string
+  durationMinutes?: number;
+  location?: string;
+  notes?: string;
+  attended: boolean;
+  important: boolean;
+  createdAt: string;
+}
+
+export interface UserProfile {
+  name: string;
+  university?: string;
+  major?: string;
+  level?: string; // e.g. "السنة الثانية"
+}
