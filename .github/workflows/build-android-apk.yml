@@ -11,6 +11,10 @@ on:
       - '.github/workflows/build-android-apk.yml'
   workflow_dispatch:
 
+concurrency:
+  group: android-apk-build
+  cancel-in-progress: true
+
 jobs:
   build:
     name: EAS Build (Android APK)
